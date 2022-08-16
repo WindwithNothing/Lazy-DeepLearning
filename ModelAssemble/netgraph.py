@@ -357,11 +357,26 @@ up1_2>decoder
 up1_3>decoder
 """
 
-test_str_multi_blcok = """#encoder-decoder
+test_str_multi_blcok_1 = """#encoder-decoder
 input: 3
-output1: 3
-output2: 3
+output: 3
 
+encoder: 32c3s1p1 + leakyrelu
+decoder: 32c3s1p1 + leakyrelu + 3c1s1p0 + leakyrelu
+
+down: 32c3s2p1 + leakyrelu + 32c3s2p1 + leakyrelu + 32c1s1p0 + leakyrelu
+d1: down
+d2: down
+d3: down
+up: 32t4s2p1 + leakyrelu + 32c1s1p0 + leakyrelu + 32t4s2p1 + leakyrelu
+u1: up
+u2: up
+u3: up
+
+code: encoder>d1>d2>d3
+decode:u1>u2>u3>decoder
+
+input>code>decode>output
 """
 
 if __name__ == "__main__":
