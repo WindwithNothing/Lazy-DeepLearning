@@ -4,11 +4,19 @@ import torch
 
 
 def str_analysis(_str):
+    """
+    processing a passage describe a neural network
+    Args:
+        _str: a
+
+    Returns: net graph with node have block describe
+    """
     lines = _str.splitlines()
     net_defines_line = []
     net_relations_line = []
     graph = nx.DiGraph()
     # pre-process
+    # separate lines into define lines and relation lines
     for line in lines:
         line = line.split('#')[0]
         if ':' in line:
@@ -26,13 +34,22 @@ def str_analysis(_str):
         if len(ls) == 2:
             pass
         else:
-            raise ValueError("无法处理定义 \"", line, '\"')
+            raise ValueError("无法处理定义 \"" + line + '\"')
         sub_l = [ll.replace(' ', '') for ll in ls]
         net_defines_dict[sub_l[0]] = sub_l[1]
     # 参考定义赋值
     for key, value in list(net_defines_dict.items()):
-        if value in net_defines_dict:
-            net_defines_dict[key] = net_defines_dict[value]
+        index = value.replace('(', '#')
+        index = index.replace(')', '#')
+        index = index.replace('+', '#')
+        index = index.replace('*', '#')
+        index = index.split('#')
+        for dex in index:
+            if dex in net_defines_dict:
+                value = value.replace(dex, net_defines_dict[dex])
+        net_defines_dict[key] = '('+value+')'
+        #if value in net_defines_dict:
+        #    net_defines_dict[key] = net_defines_dict[value]
     # 创建
     graph.add_nodes_from([(name, {'describe': desc}) for name, desc in net_defines_dict.items()])
     # ============
@@ -57,6 +74,17 @@ def str_analysis(_str):
 
 
 def graph_order(graph, begin, end):
+    """
+    generate compute order in graph from begin node to end node
+
+    Args:
+        graph:
+        begin:
+        end:
+
+    Returns:
+
+    """
     flag = {begin: True}
     queue = [begin]
     out = []
@@ -133,6 +161,11 @@ class NetGraph(nn.Module):
             print(k.ljust(15, '.'), v)
         print('compute order all pass.')
 
+    def test_describe(self):
+        print('model node describe:')
+        for block_name in self.order:
+            print(block_name, self.graph.nodes[block_name]['describe'])
+
     def plot(self):
         import matplotlib.pyplot as plt
         nx.draw_kamada_kawai(self.graph, with_labels=True, font_weight='bold')
@@ -140,6 +173,9 @@ class NetGraph(nn.Module):
 
 
 class NodeModel(nn.Module):
+    """
+    nn.Model for graph node
+    """
     def __init__(self, _str):
         super().__init__()
         self.layer = block_command(_str)
@@ -358,33 +394,34 @@ up1_3>decoder
 """
 
 test_str_multi_blcok_1 = """#encoder-decoder
-input: 3
-output: 3
+input: 4
+output: 4
 
 encoder: 32c3s1p1 + leakyrelu
 decoder: 32c3s1p1 + leakyrelu + 3c1s1p0 + leakyrelu
 
-down: 32c3s2p1 + leakyrelu + 32c3s2p1 + leakyrelu + 32c1s1p0 + leakyrelu
-d1: down
-d2: down
-d3: down
-up: 32t4s2p1 + leakyrelu + 32c1s1p0 + leakyrelu + 32t4s2p1 + leakyrelu
-u1: up
-u2: up
-u3: up
+down: 32c3s2p1 + leakyrelu + 32c3s2p1
+d1: down*2
+d2: down*2
+d3: down*2
+up: 32t4s2p1 + leakyrelu + 32c1s1p0
+u1: up*2
+u2: up*2
+u3: up*2
 
-code: encoder>d1>d2>d3
-decode:u1>u2>u3>decoder
+code: encoder+d1+d2+d3
+decode:u1+u2+u3+decoder
 
 input>code>decode>output
 """
 
 if __name__ == "__main__":
     # 32+(64c3s1p1 +relu)+ (64c1s1p0 + leakyrelu) * 3 + tanh
-    print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
-    net = NetGraph(test_str_unet_plus)
+    #print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
+    net = NetGraph(test_str_multi_blcok_1)
     print(graph_order(net.graph, 'input', 'output'))
     net.test_order()
+    net.test_describe()
     # net.test_order()
     # net.plot()
     x = torch.randn(1, 4, 128, 128)
