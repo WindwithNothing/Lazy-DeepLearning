@@ -35,7 +35,7 @@ def str_analysis(_str):
             pass
         else:
             raise ValueError("无法处理定义 \"" + line + '\"')
-        sub_l = [ll.replace(' ', '') for ll in ls]
+        sub_l = [' '.join(ll.split()) for ll in ls]
         net_defines_dict[sub_l[0]] = sub_l[1]
     # 参考定义赋值
     for key, value in list(net_defines_dict.items()):
@@ -46,9 +46,12 @@ def str_analysis(_str):
         index = index.split('#')
         for dex in index:
             if dex in net_defines_dict:
-                value = value.replace(dex, net_defines_dict[dex])
-        net_defines_dict[key] = '('+value+')'
-        #if value in net_defines_dict:
+                value = value.replace(dex, '(' + net_defines_dict[dex] + ')')
+        if value.replace(' ', '').find('(') == 0 and \
+                value.replace(' ', '').rfind(')') == len(value.replace(' ', '')) - 1:
+            value = value[value.find('(') + 1:value.rfind(')')]
+        net_defines_dict[key] = value
+        # if value in net_defines_dict:
         #    net_defines_dict[key] = net_defines_dict[value]
     # 创建
     graph.add_nodes_from([(name, {'describe': desc}) for name, desc in net_defines_dict.items()])
@@ -62,14 +65,22 @@ def str_analysis(_str):
         for b1, b2 in zip(line[:-1], line[1:]):
             graph.add_edge(b1, b2)
     for node in list(nx.isolates(graph)):
+        #  删除独立节点
         graph.remove_node(node)
+    # type defines
     for node in graph.nodes:
         if node.find('input') == 0:
             graph.nodes[node]['type'] = 'input'
         elif node.find('output') == 0:
             graph.nodes[node]['type'] = 'output'
         else:
-            graph.nodes[node]['type'] = 'layer'
+            if graph.nodes[node]['describe'].split()[0] == 'res':
+                graph.nodes[node]['type'] = 'res_layer'
+                graph.nodes[node]['describe'] = \
+                    graph.nodes[node]['describe'][
+                    graph.nodes[node]['describe'].find('res') + 3:]
+            else:
+                graph.nodes[node]['type'] = 'layer'
     return graph
 
 
@@ -100,6 +111,16 @@ def graph_order(graph, begin, end):
     return out
 
 
+#       _   _      _    _____                 _
+#      | \ | |    | |  / ____|               | |
+#      |  \| | ___| |_| |  __ _ __ __ _ _ __ | |__
+#      | . ` |/ _ \ __| | |_ | '__/ _` | '_ \| '_ \
+#      | |\  |  __/ |_| |__| | | | (_| | |_) | | | |
+#      |_| \_|\___|\__|\_____|_|  \__,_| .__/|_| |_|
+#                                      | |
+#                                      |_|
+
+
 class NetGraph(nn.Module):
     def __init__(self, string, info=None):
         super().__init__()
@@ -107,7 +128,7 @@ class NetGraph(nn.Module):
         self.graph = str_analysis(string)
         self.add_ch()
         self.order = self.block_order()
-        self.model_dict = {str(node): NodeModel(data) for node, data in self.graph.nodes(data='describe')}
+        self.model_dict = {str(node): NodeModel(data) for node, data in self.graph.nodes.items()}
         self.model_dict = nn.ModuleDict(self.model_dict)
         self.info = info
 
@@ -115,21 +136,20 @@ class NetGraph(nn.Module):
         data = {'input': x}
         for block_name in self.order[1:]:
             xx = [data[bn] for bn in self.graph.predecessors(block_name)]
-            if len(xx) > 1:
-                xx = torch.cat(xx, dim=1)
-            else:
-                xx = xx[0]
             data[block_name] = self.model_dict[block_name](xx)
         return data['output']
 
     def block_order(self):
-        #return nx.dfs_predecessors(self.graph, 'input')
+        # return nx.dfs_predecessors(self.graph, 'input')
         return graph_order(self.graph, 'input', 'output')
 
     def add_ch(self):
+        # add input channels for all blocks
+        # get all blocks' output channels
         for block_name in self.graph.nodes():
             self.graph.nodes[block_name]['out_ch'] = \
                 block_command(self.graph.nodes[block_name]['describe'], out_ch=True)
+        # apply input channels
         for block_name in self.graph.nodes():
             in_ch = []
             for pred_block_name in self.graph.pred[block_name]:
@@ -138,6 +158,27 @@ class NetGraph(nn.Module):
             if self.graph.nodes[block_name]['type'] == 'layer':
                 self.graph.nodes[block_name]['describe'] = \
                     str(sum(in_ch)) + '+' + self.graph.nodes[block_name]['describe']
+                if len(in_ch) > 1:
+                    self.graph.nodes[block_name]['input_type'] = 'cat'
+                else:
+                    self.graph.nodes[block_name]['input_type'] = None
+            elif self.graph.nodes[block_name]['type'] == 'res_layer':
+                if max(in_ch) != min(in_ch):
+                    raise ('res layer of ' + str(block_name) +
+                           ' suppose to have same input rather than ' + str(in_ch))
+                self.graph.nodes[block_name]['describe'] = \
+                    str(in_ch[0]) + '+' + self.graph.nodes[block_name]['describe']
+                self.graph.nodes[block_name]['input_type'] = 'res'
+        # check the output channels equal to upper layer output
+        nodelist = self.graph.pred['output']
+        for node in nodelist:
+            if self.graph.nodes[node]['out_ch'] != int(self.graph.nodes['output']['describe']):
+                raise ValueError('output channels is {} but node \'{}\' output is {}'.format(
+                    int(self.graph.nodes['output']['describe']), node, self.graph.nodes[node]['out_ch']
+                ))
+        if len(nodelist) > 1:
+            raise ValueError('too many layer connect to output: {}'.format(nodelist))
+
 
     def test_order(self):
         # 测试计算顺序
@@ -164,7 +205,7 @@ class NetGraph(nn.Module):
     def test_describe(self):
         print('model node describe:')
         for block_name in self.order:
-            print(block_name, self.graph.nodes[block_name]['describe'])
+            print(block_name, ':', self.graph.nodes[block_name]['describe'])
 
     def plot(self):
         import matplotlib.pyplot as plt
@@ -172,22 +213,47 @@ class NetGraph(nn.Module):
         plt.show()
 
 
+def layer_cat_process(_x):
+    return torch.cat(_x, dim=1)
+
+
+def layer_res_process(_x):
+    output_x = _x[0]
+    for xx in _x[1:]:
+        output_x += xx
+    return output_x
+
+
+def layer_none_process(_x):
+    return _x[0]
+
+
 class NodeModel(nn.Module):
     """
     nn.Model for graph node
     """
-    def __init__(self, _str):
+
+    def __init__(self, node):
         super().__init__()
-        self.layer = block_command(_str)
+        self.layer = block_command(node['describe'])
+        if node.get('input_type') == 'cat':
+            self.preprocess = layer_cat_process
+        elif node.get('input_type') == 'res':
+            self.preprocess = layer_res_process
+        else:
+            self.preprocess = layer_none_process
 
-    def forward(self, x):
-        return self.layer(x)
+    def forward(self, _x):
+        _x = self.preprocess(_x)
+        return self.layer(_x)
 
 
-# =======================================
+#
+# ___  _    ____ ____ _  _    ____ ____ _  _ _  _ ____ _  _ ___
+# |__] |    |  | |    |_/     |    |  | |\/| |\/| |__| |\ | |  \
+# |__] |___ |__| |___ | \_    |___ |__| |  | |  | |  | | \| |__/
 #
 #
-# =======================================
 
 
 def block_command(command_str, out_ch=False):
@@ -394,17 +460,18 @@ up1_3>decoder
 """
 
 test_str_multi_blcok_1 = """#encoder-decoder
+# multi level network
 input: 4
 output: 4
 
 encoder: 32c3s1p1 + leakyrelu
 decoder: 32c3s1p1 + leakyrelu + 3c1s1p0 + leakyrelu
 
-down: 32c3s2p1 + leakyrelu + 32c3s2p1
+down: 32c3s2p1 + leakyrelu + 32c3s2p1 + leakyrelu
 d1: down*2
 d2: down*2
 d3: down*2
-up: 32t4s2p1 + leakyrelu + 32c1s1p0
+up: 32t4s2p1 + leakyrelu + 32c1s1p0 + leakyrelu
 u1: up*2
 u2: up*2
 u3: up*2
@@ -415,10 +482,32 @@ decode:u1+u2+u3+decoder
 input>code>decode>output
 """
 
+test_str_resnet = """#resnet
+input: 4
+output: 4
+encoder: (32c3s1p1+leakyrelu) * 3
+decoder: (32c3s1p1+leakyrelu) * 3 + 4c3s1p1+leakyrelu
+down: (32c3s2p1+leakyrelu)*2
+down1: down
+down2: down
+down3: down
+up: res (32t4s2p1+leakyrelu)*2
+up1: up
+up2: up
+up3: up
+center: 32c1s1p0
+input > encoder
+encoder > down1 > down2 > down3 > center
+center > up3 > up2 > up1 > decoder > output
+down3 > up3
+down2 > up2
+down1 > up1
+"""
+
 if __name__ == "__main__":
     # 32+(64c3s1p1 +relu)+ (64c1s1p0 + leakyrelu) * 3 + tanh
-    #print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
-    net = NetGraph(test_str_multi_blcok_1)
+    # print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
+    net = NetGraph(test_str_resnet)
     print(graph_order(net.graph, 'input', 'output'))
     net.test_order()
     net.test_describe()
@@ -427,5 +516,5 @@ if __name__ == "__main__":
     x = torch.randn(1, 4, 128, 128)
     y = net(x)
     print(y.shape)
-    net.plot()
+    # net.plot()
     pass
