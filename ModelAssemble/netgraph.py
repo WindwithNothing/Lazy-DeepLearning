@@ -1,6 +1,7 @@
 import networkx as nx
-import torch.nn as nn
 import torch
+import torch.nn as nn
+from ModelAssemble.graphfunction import block_command
 
 
 def str_analysis(_str):
@@ -101,13 +102,13 @@ def graph_order(graph, begin, end):
     out = []
     while queue:
         node = queue[0]
-        if all([(n in flag) for n in graph.pred[node]]):
+        queue = queue[1:]
+        if all([(n in flag) for n in graph.pred[node]]) and node not in out:
             flag[node] = True
             queue = queue + [n for n in graph.succ[node].keys()]
             out.append(node)
             if node == end:
                 break
-        queue = queue[1:]
     return out
 
 
@@ -126,7 +127,7 @@ class NetGraph(nn.Module):
         super().__init__()
         self.string = string
         self.graph = str_analysis(string)
-        self.add_ch()
+        self.check_node()
         self.order = self.block_order()
         self.model_dict = {str(node): NodeModel(data) for node, data in self.graph.nodes.items()}
         self.model_dict = nn.ModuleDict(self.model_dict)
@@ -143,18 +144,20 @@ class NetGraph(nn.Module):
         # return nx.dfs_predecessors(self.graph, 'input')
         return graph_order(self.graph, 'input', 'output')
 
-    def add_ch(self):
+    def check_node(self):
         # add input channels for all blocks
         # get all blocks' output channels
         for block_name in self.graph.nodes():
             self.graph.nodes[block_name]['out_ch'] = \
                 block_command(self.graph.nodes[block_name]['describe'], out_ch=True)
-        # apply input channels
+        # apply input channels and input_type
         for block_name in self.graph.nodes():
+            # input channels list
             in_ch = []
             for pred_block_name in self.graph.pred[block_name]:
                 in_ch.append(self.graph.nodes[pred_block_name]['out_ch'])
             self.graph.nodes[block_name]['in_ch'] = in_ch
+            # input_type
             if self.graph.nodes[block_name]['type'] == 'layer':
                 self.graph.nodes[block_name]['describe'] = \
                     str(sum(in_ch)) + '+' + self.graph.nodes[block_name]['describe']
@@ -169,16 +172,29 @@ class NetGraph(nn.Module):
                 self.graph.nodes[block_name]['describe'] = \
                     str(in_ch[0]) + '+' + self.graph.nodes[block_name]['describe']
                 self.graph.nodes[block_name]['input_type'] = 'res'
+            # check convolution and fully-connet
+            pred_type = ''
+            for pred_block_name in self.graph.pred[block_name]:
+                if 'fc' in self.graph.nodes[pred_block_name]:
+                    pred_type = 'fc'
+                else:
+                    pred_type = 'conv'
+            if 'fc' in self.graph.nodes[block_name]:
+                if pred_type == 'conv':
+                    self.graph.nodes[block_name]['reshape'] = 'conv2fc'
+            else:
+                if pred_type == 'fc':
+                    self.graph.nodes[block_name]['reshape'] = 'fc2conv'
+
         # check the output channels equal to upper layer output
         nodelist = self.graph.pred['output']
         for node in nodelist:
             if self.graph.nodes[node]['out_ch'] != int(self.graph.nodes['output']['describe']):
-                raise ValueError('output channels is {} but node \'{}\' output is {}'.format(
+                raise ValueError('output channels not match: output channels is {} but node \'{}\' output is {}'.format(
                     int(self.graph.nodes['output']['describe']), node, self.graph.nodes[node]['out_ch']
                 ))
         if len(nodelist) > 1:
             raise ValueError('too many layer connect to output: {}'.format(nodelist))
-
 
     def test_order(self):
         # 测试计算顺序
@@ -193,19 +209,19 @@ class NetGraph(nn.Module):
                 if compute_dict[pred_block_name] is True:
                     continue
                 else:
-                    raise ValueError(block_name, ' compute need ',
-                                     pred_block_name, ' but it is uncomputed in ',
-                                     compute_dict)
+                    raise ValueError('{} compute need {} but it is uncomputed in {}'. \
+                                     format(block_name, pred_block_name, compute_dict))
             compute_dict[block_name] = True
         print('compute result is:')
         for k, v in compute_dict.items():
             print(k.ljust(15, '.'), v)
-        print('compute order all pass.')
+        print('compute order all pass.\n')
 
     def test_describe(self):
         print('model node describe:')
         for block_name in self.order:
             print(block_name, ':', self.graph.nodes[block_name]['describe'])
+        print('')
 
     def plot(self):
         import matplotlib.pyplot as plt
@@ -213,19 +229,27 @@ class NetGraph(nn.Module):
         plt.show()
 
 
-def layer_cat_process(_x):
+def _layer_process_cat(_x):
     return torch.cat(_x, dim=1)
 
 
-def layer_res_process(_x):
+def _layer_process_res(_x):
     output_x = _x[0]
     for xx in _x[1:]:
         output_x += xx
     return output_x
 
 
-def layer_none_process(_x):
+def _layer_process_none(_x):
     return _x[0]
+
+
+def _layer_reshape_conv2fc(_x):
+    return _x.flatten(1)
+
+
+def _layer_reshape_fc2conv(_x):
+    return _x.reshape()
 
 
 class NodeModel(nn.Module):
@@ -237,144 +261,23 @@ class NodeModel(nn.Module):
         super().__init__()
         self.layer = block_command(node['describe'])
         if node.get('input_type') == 'cat':
-            self.preprocess = layer_cat_process
+            self.preprocess = _layer_process_cat
         elif node.get('input_type') == 'res':
-            self.preprocess = layer_res_process
+            self.preprocess = _layer_process_res
         else:
-            self.preprocess = layer_none_process
+            self.preprocess = _layer_process_none
+        if node.get('reshape') == 'conv2fc':
+            self._reshape = _layer_reshape_conv2fc
+        elif node.get('reshape') == 'fc2conv':
+            self._reshape = _layer_reshape_fc2conv
 
     def forward(self, _x):
         _x = self.preprocess(_x)
+        _x = self._reshape(_x)
         return self.layer(_x)
 
 
-#
-# ___  _    ____ ____ _  _    ____ ____ _  _ _  _ ____ _  _ ___
-# |__] |    |  | |    |_/     |    |  | |\/| |\/| |__| |\ | |  \
-# |__] |___ |__| |___ | \_    |___ |__| |  | |  | |  | | \| |__/
-#
-#
 
-
-def block_command(command_str, out_ch=False):
-    def split_command(st):
-        if st == '':
-            return []
-        out = []
-        out_dict = {}
-        unit = ''
-        for s in st:
-            if s.isdigit() == unit.isdigit() or len(unit) == 0:
-                unit += s
-                continue
-            else:
-                out.append(unit)
-                unit = s
-        out.append(unit)
-        if out[0].isdigit():
-            out_dict['ch'] = int(out[0])
-            if len(out) > 1:
-                out_dict['layer'] = out[1]
-                sub_out = out[1:]
-                for i in range(len(sub_out) // 2):
-                    out_dict[sub_out[i * 2]] = int(sub_out[i * 2 + 1])
-        else:
-            out_dict['layer'] = out[0]
-            if len(out) > 1:
-                out_dict['set'] = float(out[1])
-                sub_out = out
-                for i in range(len(sub_out) // 2):
-                    out_dict[sub_out[i * 2]] = int(sub_out[i * 2 + 1])
-        return out_dict
-
-    # 字符串拆分为无运算符格式?"
-    _str = command_str
-    stack = []
-    stack_out = []
-    priority = {'(': 1, ')': 2, '*': 3, '+': 4}
-    start = 0
-    for i, s in enumerate(_str):
-        if s in '()*+':
-            end = i
-            unit_str = _str[start: end]
-            stack_out.append(unit_str)
-            if s == '(':
-                start = i + 1
-                stack.append(s)
-            elif s == ')':
-                start = i + 1
-                while stack[-1] != '(':
-                    stack_out.append(stack.pop())
-                stack_out.append(stack.pop())
-            elif s in '+*':
-                if stack == [] or priority[s] < priority[stack[-1]]:
-                    stack.append(s)
-                else:
-                    if stack[-1] not in '()':
-                        stack_out.append(stack.pop())
-                    stack.append(s)
-                start = i + 1
-    stack_out.append(_str[start:])
-    while stack:
-        stack_out.append(stack.pop())
-
-    stack = []
-    for s in stack_out:
-        s = s.replace(' ', '')
-        if s == '(':
-            continue
-        if s == '':
-            continue
-        if s == '+':
-            a1 = stack.pop()
-            a2 = stack.pop()
-            stack.append(a2 + ' ' + a1)
-        elif s == '*':
-            a1 = stack.pop()
-            a2 = stack.pop()
-            if a1.isdigit():
-                stack.append((a2 + ' ') * int(a1))
-            else:
-                stack.append((a1 + ' ') * int(a2))
-        else:
-            stack.append(s)
-    _str = stack[0]
-
-    # 生成神经网络Sequential
-    # 例子'32 64c3s1p1 relu 64c3s1p1 tanh'
-    while _str.find('  ') >= 0:
-        _str = _str.replace('  ', ' ')
-    _str = _str.strip()
-    command_list = [split_command(st) for st in _str.lower().split(' ')]
-    if out_ch:
-        for com in command_list[::-1]:
-            if 'ch' in com:
-                return com['ch']
-        raise ValueError('can\' find channel info in ', command_str)
-    in_ch = command_list[0]['ch']
-    block_list = []
-    for com in command_list[1:]:
-        if com['layer'] == 'c':
-            block_list.append(nn.Conv2d(in_ch, com['ch'], kernel_size=com['c'],
-                                        stride=com['s'], padding=com['p']))
-        elif com['layer'] == 't':
-            block_list.append(nn.ConvTranspose2d(in_ch, com['ch'], kernel_size=com['t'],
-                                                 stride=com['s'], padding=com['p']))
-        elif com['layer'] == 'relu':
-            block_list.append(nn.ReLU(inplace=True))
-        elif com['layer'] == 'tanh':
-            block_list.append(nn.Tanh())
-        elif com['layer'] in ['leakyrelu', 'r']:
-            if len(com) > 1:
-                k = float(com[1])
-            else:
-                k = 0.01
-            block_list.append(nn.LeakyReLU(k, inplace=True))
-        elif com['layer'] == 'maxpool':
-            block_list.append(nn.MaxPool2d(kernel_size=com['set'], stride=com['s'], padding=com['p']))
-        if 'ch' in com:
-            in_ch = com['ch']
-    return nn.Sequential(*block_list)
 
 
 test_str_unet = """# UNet
@@ -504,11 +407,20 @@ down2 > up2
 down1 > up1
 """
 
+test_str_fc = """#encoder-decoder with fully connect
+input:4
+output:64
+encoder: (32c3s2p1+leakyrelu) * 4 + 64c3s2p1+leakyrelu
+decoder: (32t4s2p1+leakyrelu) * 3
+outdecoder: 1024fc64 + leakyrelu
+input>encoder>outdecoder>output
+"""
+
 if __name__ == "__main__":
     # 32+(64c3s1p1 +relu)+ (64c1s1p0 + leakyrelu) * 3 + tanh
     # print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
-    net = NetGraph(test_str_resnet)
-    print(graph_order(net.graph, 'input', 'output'))
+    net = NetGraph(test_str_fc)
+    print('compute order:', graph_order(net.graph, 'input', 'output'))
     net.test_order()
     net.test_describe()
     # net.test_order()
@@ -516,5 +428,6 @@ if __name__ == "__main__":
     x = torch.randn(1, 4, 128, 128)
     y = net(x)
     print(y.shape)
+    print(net.graph.nodes['outdecoder'])
     # net.plot()
     pass
