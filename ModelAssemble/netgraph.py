@@ -1,12 +1,12 @@
 import networkx as nx
 import torch
 import torch.nn as nn
-from ModelAssemble.graphfunction import block_command
+from ModelAssemble.graphfunction import Command
 
 
 def str_analysis(_str):
     """
-    processing a passage describe a neural network
+    processing a passage describe a neural network generate graph
     Args:
         _str: a
 
@@ -141,6 +141,7 @@ class NetGraph(nn.Module):
         return data['output']
 
     def block_order(self):
+        # get compute order
         # return nx.dfs_predecessors(self.graph, 'input')
         return graph_order(self.graph, 'input', 'output')
 
@@ -148,44 +149,18 @@ class NetGraph(nn.Module):
         # add input channels for all blocks
         # get all blocks' output channels
         for block_name in self.graph.nodes():
-            self.graph.nodes[block_name]['out_ch'] = \
-                block_command(self.graph.nodes[block_name]['describe'], out_ch=True)
-        # apply input channels and input_type
+            self.graph.nodes[block_name]['command'] = \
+                Command(self.graph.nodes[block_name]['describe'])
         for block_name in self.graph.nodes():
-            # input channels list
+            self.graph.nodes[block_name]['out_ch'] = \
+                self.graph.nodes[block_name]['command'].out_ch
+        # set input shape
+        for node in self.graph.nodes():
             in_ch = []
-            for pred_block_name in self.graph.pred[block_name]:
-                in_ch.append(self.graph.nodes[pred_block_name]['out_ch'])
-            self.graph.nodes[block_name]['in_ch'] = in_ch
-            # input_type
-            if self.graph.nodes[block_name]['type'] == 'layer':
-                self.graph.nodes[block_name]['describe'] = \
-                    str(sum(in_ch)) + '+' + self.graph.nodes[block_name]['describe']
-                if len(in_ch) > 1:
-                    self.graph.nodes[block_name]['input_type'] = 'cat'
-                else:
-                    self.graph.nodes[block_name]['input_type'] = None
-            elif self.graph.nodes[block_name]['type'] == 'res_layer':
-                if max(in_ch) != min(in_ch):
-                    raise ('res layer of ' + str(block_name) +
-                           ' suppose to have same input rather than ' + str(in_ch))
-                self.graph.nodes[block_name]['describe'] = \
-                    str(in_ch[0]) + '+' + self.graph.nodes[block_name]['describe']
-                self.graph.nodes[block_name]['input_type'] = 'res'
-            # check convolution and fully-connet
-            pred_type = ''
-            for pred_block_name in self.graph.pred[block_name]:
-                if 'fc' in self.graph.nodes[pred_block_name]:
-                    pred_type = 'fc'
-                else:
-                    pred_type = 'conv'
-            if 'fc' in self.graph.nodes[block_name]:
-                if pred_type == 'conv':
-                    self.graph.nodes[block_name]['reshape'] = 'conv2fc'
-            else:
-                if pred_type == 'fc':
-                    self.graph.nodes[block_name]['reshape'] = 'fc2conv'
-
+            for pre_node in self.graph.pred[node]:
+                in_ch.append(self.graph.nodes[pre_node]['command'].out_ch)
+            self.graph.nodes[node]['command'].set_input_shape(in_ch)
+        '''
         # check the output channels equal to upper layer output
         nodelist = self.graph.pred['output']
         for node in nodelist:
@@ -195,6 +170,7 @@ class NetGraph(nn.Module):
                 ))
         if len(nodelist) > 1:
             raise ValueError('too many layer connect to output: {}'.format(nodelist))
+        '''
 
     def test_order(self):
         # 测试计算顺序
@@ -244,14 +220,6 @@ def _layer_process_none(_x):
     return _x[0]
 
 
-def _layer_reshape_conv2fc(_x):
-    return _x.flatten(1)
-
-
-def _layer_reshape_fc2conv(_x):
-    return _x.reshape()
-
-
 class NodeModel(nn.Module):
     """
     nn.Model for graph node
@@ -259,25 +227,17 @@ class NodeModel(nn.Module):
 
     def __init__(self, node):
         super().__init__()
-        self.layer = block_command(node['describe'])
-        if node.get('input_type') == 'cat':
+        self.layer = node['command'].generate_layers()
+        if node['command'].input_type == 'cat':
             self.preprocess = _layer_process_cat
-        elif node.get('input_type') == 'res':
+        elif node['command'].input_type == 'res':
             self.preprocess = _layer_process_res
         else:
             self.preprocess = _layer_process_none
-        if node.get('reshape') == 'conv2fc':
-            self._reshape = _layer_reshape_conv2fc
-        elif node.get('reshape') == 'fc2conv':
-            self._reshape = _layer_reshape_fc2conv
 
     def forward(self, _x):
         _x = self.preprocess(_x)
-        _x = self._reshape(_x)
         return self.layer(_x)
-
-
-
 
 
 test_str_unet = """# UNet
@@ -394,7 +354,7 @@ down: (32c3s2p1+leakyrelu)*2
 down1: down
 down2: down
 down3: down
-up: res (32t4s2p1+leakyrelu)*2
+up: res, (32t4s2p1+leakyrelu)*2
 up1: up
 up2: up
 up3: up
@@ -411,23 +371,32 @@ test_str_fc = """#encoder-decoder with fully connect
 input:4
 output:64
 encoder: (32c3s2p1+leakyrelu) * 4 + 64c3s2p1+leakyrelu
-decoder: (32t4s2p1+leakyrelu) * 3
-outdecoder: 1024fc64 + leakyrelu
+#decoder: (32t4s2p1+leakyrelu) * 3
+outdecoder: reshape1024 + 1024fc64 + leakyrelu
 input>encoder>outdecoder>output
+"""
+
+test_str_encoder_decoder = """#encoder-decoder with fully connect
+input:4
+output:4
+encoder: (32c3s2p1+leakyrelu) * 4 + 64c3s2p1+leakyrelu
+decoder: (64t4s2p1+leakyrelu) * 4 + 4t4s2p1+leakyrelu
+core: reshape1024 + 1024fc64 + leakyrelu + 64fc1024 + leakyrelu + reshape64_4_4
+input>encoder>core>decoder>output
 """
 
 if __name__ == "__main__":
     # 32+(64c3s1p1 +relu)+ (64c1s1p0 + leakyrelu) * 3 + tanh
     # print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
-    net = NetGraph(test_str_fc)
+    net = NetGraph(test_str_encoder_decoder)
     print('compute order:', graph_order(net.graph, 'input', 'output'))
     net.test_order()
     net.test_describe()
     # net.test_order()
     # net.plot()
-    x = torch.randn(1, 4, 128, 128)
+    x = torch.randn(16, 4, 128, 128)
+    print(net.model_dict)
     y = net(x)
     print(y.shape)
-    print(net.graph.nodes['outdecoder'])
     # net.plot()
     pass
