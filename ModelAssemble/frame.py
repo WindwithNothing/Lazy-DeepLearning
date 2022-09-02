@@ -434,7 +434,7 @@ class FolderManager:
         if key:
             return eval(torch.load(self.optim_library_name)[key], {'torch': torch})
         else:
-            torch.load(self.optim_library_name)
+            return torch.load(self.optim_library_name)
 
     def data_library(self, key=None):
         file_list = os.listdir(self.database)
@@ -449,6 +449,9 @@ class FolderManager:
 
 
 class NormalObject:
+    """
+    Normalize data for Frame, this will auto scale data from data.
+    """
     def __init__(self, input_data=None, target_data=None,
                  input_boundary=None, target_boundary=None, params_dict=None):
         if input_boundary is not None and target_boundary is not None:

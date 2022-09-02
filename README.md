@@ -8,7 +8,7 @@ This project offer two class for machine learning,
 a neural network model 
 and a framework for manage and train models.
 
-### NetGraph
+## NetGraph
 
 NetGraph is a model generate class.
 
@@ -47,7 +47,7 @@ from ModelAssemble.netgraph import NetGraph
 net = NetGraph(unet_str)
 ```
 
-You can use `.plot()` to show the graph construt
+You can use `.plot()` to show the model's graph
 ```python
 net.plot()
 ```
@@ -63,7 +63,7 @@ At present design, import NetGraph is to verify
 the text describe can be recognized correctly. 
 Use manager above will create NetGraph automatically. 
 
-### FolderManager
+## FolderManager
 
 FolderManager is a class for manage models, 
 which support a easy way to manage your models. 
@@ -83,8 +83,10 @@ Then train the model and save it.
 And easy load frame to continue training:
 ```python
 from ModelAssemble.frame import FolderManager
+# Create FolderManager
 manage = FolderManager()
 
+# Describe model construction
 unet_str =\
 """#unet
 input: 4
@@ -111,6 +113,7 @@ down2>up2
 down1>up1
 """
 
+# Set frame parameters
 model_set = dict(
     model_str=unet_str,
     train_data = 'data200',
@@ -127,27 +130,35 @@ model_set = dict(
     normalize='normalization'
 )
 
+# Create frame
 frame = manage.create_frame(model_set)
+# Train model
 frame.run(1000)
+# Save model
 manage.save_frame(frame)
 ```
+Load frame in the other program:
 ```python
-# Load frame in the other program.
 from ModelAssemble.frame import FolderManager
+# Create FolderManager
 manage = FolderManager()
 
+# Load frame
 frame = manage.load_frame('unet')
+# Continue Train
 frame.run(2000)
 ```
 
+### How to use
+#### Create FolderManager 
 
 To use this framework, you need to import and create object.
 ```python
 from ModelAssemble.frame import FolderManager
 manage = FolderManager()
 ```
-Notice: when you create the object, 
-it will create several folder under work path in the first time.
+**Notice: when you create the object, 
+it will create several folder under work path in the first time.** 
 
 Folder construct like this:
 ```
@@ -156,12 +167,94 @@ Folder construct like this:
 │   ├─ loss_library.pt
 │   └─ optim_library.pt
 ```
+
+These folders save 4 types of data( and method to list names in folder): 
+- Dataset `.data_library()`
+- Model `.models()`
+- LossFunction `.loss_library()`
+- OptimFunction `.optim_library()`
+```python
+>>> manage.loss_library()
+{'L1': 'nn.L1Loss()',
+ 'L2': 'nn.MSELoss()',
+ 'SmoothL1': 'nn.SmoothL1Loss()',
+ 'Huber': 'nn.HuberLoss()'}
+```
+
+#### Create Frame
+Use `manage.create_frame(model_set)` to create a Frame.
+
+`model_set` is a dict which keys and values should be string or numerical specify the frame setting.
+So the setting is easy to save and load.
+
+A full `model_set` looks like this as before show:
+```python
+model_set = dict(
+    model_str=unet_str,
+    train_data = 'data200',
+    test_data='data_001_test',
+    loss='SmoothL1',
+    optim='Adam',
+    batch_size=32,
+    fakebatch=2,
+    bias='bias',
+    output_mask='mask',
+    device='cuda',
+    data_device='cuda',
+    filename='unet',
+    normalize='normalization'
+)
+```
+
+`model_str`:describe string in NetGraph, usually it is a long string, 
+put it in other place can make code clear.
+
+`train_data`: Dataset name, frame will use this dataset to train. 
+
+`test_data`: Dataset name, Optional. 
+If train_data not include test data, use this to specify test dataset.
+If you want use test dataset included in `train_data`, delete this key.
+More detail in above `Dataset` section.
+
+`loss`: loss name, loss function be used.
+
+`optim`: optimzer name, optimzer to be used.
+
+`batch_size`: batch size.
+
+`fakebatch`: little batch, when memory can hold a batch, use this. 
+The frame will compute in `fakebatch` size, and backward in `batch_size`.
+
+`bias`: specify unchanged input layer, only use in some question. 
+Available value in database
+
+`output_mask`: specify a mask filter output, 
+only filtered output effective in backward and evaluation.
+
+`device`: model device. model will train in this device.
+
+`data_device`: dataset device. If in different device with model, 
+frame will only transform training data into model's device.
+
+`filename`: name of the model's file. If not specify, 
+model will have a serial number depend on models which the manager already have.
+If specify, final name still have a serial number before specified name.
+
+`normalize`: if dataset without normalized, specify a normalization, 
+it will auto normal data in running the model. 
+
+
     
-#### Dataset
+### Dataset
 You need to put you dataset into `database` folder. 
-you need to use `torch.save()` to prepare the dataset.
+you need to use `torch.save()` to prepare the dataset, 
+and the name's extension is '.pt'.
 
 The format of dataset should be a list of `torch.Tensor`.
+Each Tensor should be a 'Big Batch', 
+which mean the first value of shape of Tensor is the number of samples. 
+Other values is samples shapes correspond to model's first layer. 
+For example, the shape of an image dataset is `(samples number, image layers, H, W)` 
  
 List length should be 2 or 4. If 2, the first Tensor is input value,  second Tensor is target value.
 Like `[input, target]`. If length is 4, list should be `[input1, target1, input2, target2]`. 
