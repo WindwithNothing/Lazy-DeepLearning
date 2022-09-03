@@ -5,14 +5,16 @@ A Troch enhance model for simplify coding process in deep-learning
 ## Introduction
 
 This project offer two class for machine learning, 
-a neural network model 
+an artificial neural network(ANN) model 
 and a framework for manage and train models.
 
 ## NetGraph
 
-NetGraph is a model generate class.
+NetGraph is a model generate class. 
+The main purpose of this section is to explain how to write 
+an ANN describe string for this project.
 
-In this project a neural network can be described by a text like this:
+In this project an ANN can be described by a text like this:
 ```python
 unet_str =\ 
 """#unet
@@ -41,7 +43,25 @@ down1>up1
 """
 ```
 
-Use NetGraph generate model by this text.
+`\n` is used to split the describe. Every line is a definition of ANN. 
+But after `#` is recognized as notes.
+
+There are two types of definition:
+ 
+Lines include `:` are blocks definition, which define various layers to be used.
+
+Lines include `>` are connect definition, which define the connect relationship between blocks. Data flow from left to right.
+
+Most time ANN construct is a chain, which mean each layer only have one layer connect to input one layer connect to output.
+But in some ANN, a part of layers need to have multi input or output like u-net, so I design this describe method. 
+Chain connect layers describe as blocks. Complex connect describe in connect definition additionally.
+
+`input` `output` is key words in this project to identify models input and output.
+(At present, only support one input and output, so avoid use these key words in other node)
+
+
+
+Use NetGraph generate model by above text.
 ```python
 from ModelAssemble.netgraph import NetGraph
 net = NetGraph(unet_str)
@@ -149,7 +169,7 @@ frame = manage.load_frame('unet')
 frame.run(2000)
 ```
 
-### How to use
+## How to use
 #### Create FolderManager 
 
 To use this framework, you need to import and create object.
