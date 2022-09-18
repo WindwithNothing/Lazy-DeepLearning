@@ -156,7 +156,7 @@ def generate_layer_sequence(_list, in_ch=None):
         in_ch = _list[0]['ch']
         _list = _list[1:]
     block_list = []
-    print(in_ch, _list)
+    #print(in_ch, _list)
     for com in _list:
         if com['layer'] == 'c':
             block_list.append(nn.Conv2d(in_ch, com['ch'], kernel_size=com['c'],
@@ -171,6 +171,8 @@ def generate_layer_sequence(_list, in_ch=None):
             block_list.append(nn.ReLU(inplace=True))
         elif com['layer'] == 'tanh':
             block_list.append(nn.Tanh())
+        elif com['layer'] == 'sigmoid':
+            block_list.append(nn.Sigmoid())
         elif com['layer'] in ['leakyrelu', 'r']:
             if len(com) > 1:
                 k = float(com[1])
@@ -179,8 +181,14 @@ def generate_layer_sequence(_list, in_ch=None):
             block_list.append(nn.LeakyReLU(k, inplace=True))
         elif com['layer'] == 'maxpool':
             block_list.append(nn.MaxPool2d(kernel_size=com['set'], stride=com['s'], padding=com['p']))
+        elif com['layer'] == 'a_avgpool':
+            block_list.append(nn.AdaptiveAvgPool2d(output_size=com['set']))
+        elif com['layer'] == 'a_maxpool':
+            block_list.append(nn.AdaptiveMaxPool2d(output_size=com['set']))
         elif com['layer'] == 'reshape':
             block_list.append(ReshapeLayer(com['set']))
+        else:
+            raise ValueError("Unknown layer {}".format(com))
         if 'ch' in com:
             in_ch = com['ch']
     return nn.Sequential(*block_list)
@@ -209,6 +217,7 @@ class Command:
         self.analysis_describe(self._str)
 
     def analysis_describe(self, _str):
+        # first analyze the command, seperate by ','
         com = _str.split(',')
         for c in com[:-1]:
             c = split_command(c)

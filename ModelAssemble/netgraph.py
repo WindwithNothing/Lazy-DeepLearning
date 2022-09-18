@@ -68,6 +68,11 @@ def str_analysis(_str):
     for node in list(nx.isolates(graph)):
         #  删除独立节点
         graph.remove_node(node)
+    # check if nodes in graph are defined
+    for node in graph.nodes:
+        if node not in net_defines_dict:
+            raise ValueError('node \'{}\' in relation-graph not in defined in {}'.format(
+                node, net_defines_dict.keys()))
     # type defines
     for node in graph.nodes:
         if node.find('input') == 0:
@@ -133,12 +138,15 @@ class NetGraph(nn.Module):
         self.model_dict = nn.ModuleDict(self.model_dict)
         self.info = info
 
-    def forward(self, x):
-        data = {'input': x}
+    def forward(self, _x, return_all=False):
+        data = {'input': _x}
         for block_name in self.order[1:]:
             xx = [data[bn] for bn in self.graph.predecessors(block_name)]
             data[block_name] = self.model_dict[block_name](xx)
-        return data['output']
+        if return_all:
+            return data
+        else:
+            return data['output']
 
     def block_order(self):
         # get compute order
