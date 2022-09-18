@@ -26,6 +26,7 @@ class TrainFrame:
                  device=None,
                  info=None,
                  manager=None,
+                 num_workers=0,
                  **kwargs
                  ):
         if not isinstance(model, nn.Module):
@@ -61,8 +62,8 @@ class TrainFrame:
                 self.set_dict[key] = value
             else:
                 raise ValueError("Unknow key " + key)
-        self.traindata = DataLoader(traindata, batch_size=self.set_dict['batch'], shuffle=True)
-        self.testdata = DataLoader(testdata, batch_size=self.set_dict['batch'], shuffle=False)
+        self.traindata = DataLoader(traindata, batch_size=self.set_dict['batch'], shuffle=True, num_workers=num_workers)
+        self.testdata = DataLoader(testdata, batch_size=self.set_dict['batch'], shuffle=False, num_workers=num_workers)
         self.checkdata = None
         self.output_mask = output_mask
         self.set_checkdata(checkdata)
@@ -115,7 +116,7 @@ class TrainFrame:
         s.axes.scatter(min_index, min_value, color='r')
         s.axes.set_xlim(0)
 
-    def run(self, times, checkpoint: int = 50):
+    def run(self, times, checkpoint: int = 20):
         # main method for train model
         for i in Tqdm(range(times), desc=self.info['filename']):
             train_loss, test_loss = self.epoch()
@@ -259,6 +260,7 @@ class FolderManager:
         pass
 
     def models(self):
+        # list available models
         file_list = os.listdir(self.base)
         file_list = filter(lambda n: n.split('_')[0].isdigit(), file_list)
         file_list = list(file_list)
@@ -266,6 +268,7 @@ class FolderManager:
         return file_list
 
     def default_new_model_name(self):
+        # get a new number for model
         file_list = self.models()
         if len(file_list) == 0:
             return '0'
@@ -389,6 +392,8 @@ class FolderManager:
         return NormalObject(params_dict=self.data_library(name))
 
     def load_history(self, model: str, info: str = None):
+        # load a history file to pandas
+        # # will support sequence name in future versions
         file = os.path.join(self.base, model)
         if not os.path.exists(file):
             raise FileNotFoundError('model:', file, 'not found')
@@ -425,18 +430,24 @@ class FolderManager:
             torch.save(optim_dict, self.optim_library_name)
 
     def loss_library(self, key=None):
+        # return a loss dictionary if not specified,
+        # specify key return corresponding loss
         if key:
             return eval(torch.load(self.loss_library_name)[key], {'nn': nn})
         else:
             return torch.load(self.loss_library_name)
 
     def optim_library(self, key=None):
+        # return a optimization dictionary if not specified,
+        # specify key return corresponding optimization
         if key:
             return eval(torch.load(self.optim_library_name)[key], {'torch': torch})
         else:
             return torch.load(self.optim_library_name)
 
     def data_library(self, key=None):
+        # return a file list in data folder,
+        # specify key return corresponding data
         file_list = os.listdir(self.database)
         if key:
             for file in file_list:
