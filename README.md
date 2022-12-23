@@ -47,7 +47,7 @@ down1>up1
 But after `#` is recognized as notes.
 
 There are two types of definition:
- 
+
 Lines include `:` are blocks definition, which define various layers to be used.
 
 Lines include `>` are connect definition, which define the connect relationship between blocks. Data flow from left to right.
@@ -71,7 +71,7 @@ You can use `.plot()` to show the model's graph
 ```python
 net.plot()
 ```
-![Plot image](/assets/images/graphplot.png)
+![Plot image](./assets/images/graphplot.png)
 
 The class is inherit from `torch.nn.Model`, use model as original.
 ```python 
@@ -243,7 +243,7 @@ More detail in above `Dataset` section.
 `batch_size`: batch size.
 
 `fakebatch`: little batch, when memory can hold a batch, use this. 
-The frame will compute in `fakebatch` size, and backward in `batch_size`.
+The frame will compute in `fakebatch` size, and backward in `batch_size`. The method based on Q4 in https://github.com/IgorSusmelj/pytorch-styleguide
 
 `bias`: specify unchanged input layer, only use in some question. 
 Available value in database
@@ -264,7 +264,7 @@ If specify, final name still have a serial number before specified name.
 it will auto normal data in running the model. 
 
 
-    
+​    
 ### Dataset
 You need to put you dataset into `database` folder. 
 you need to use `torch.save()` to prepare the dataset, 
@@ -275,7 +275,7 @@ Each Tensor should be a 'Big Batch',
 which mean the first value of shape of Tensor is the number of samples. 
 Other values is samples shapes correspond to model's first layer. 
 For example, the shape of an image dataset is `(samples number, image layers, H, W)` 
- 
+
 List length should be 2 or 4. If 2, the first Tensor is input value,  second Tensor is target value.
 Like `[input, target]`. If length is 4, list should be `[input1, target1, input2, target2]`. 
 When frame load a 4 length dataset, 

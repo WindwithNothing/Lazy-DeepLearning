@@ -275,6 +275,13 @@ class FolderManager:
         number = int(file_list[-1].split('_')[0]) + 1
         return str(number)
 
+    def info_precess(self, info=None):
+        if info is None:
+            pre = ''
+        else:
+            pre = info + '_'
+        return pre
+
     def create_frame(self, model_set: dict):
         # use a dict to create a ANN frame, dict value should all be strings
         # the dict must have:
@@ -311,10 +318,7 @@ class FolderManager:
                           )
 
     def save_frame(self, frame: TrainFrame, info=None):
-        if info is None:
-            pre = ''
-        else:
-            pre = info + '_'
+        pre = self.info_precess(info)
         file = os.path.join(self.base, frame.info['filename'])
         if not os.path.exists(file):
             os.mkdir(file)
@@ -335,10 +339,7 @@ class FolderManager:
             plt.close()
 
     def load_frame_set(self, filename, info=None, new_set: dict = None):
-        if info is None:
-            pre = ''
-        else:
-            pre = info + '_'
+        pre = self.info_precess(info)
         file = os.path.join(self.base, filename)
         # set file
         with open(os.path.join(file, pre + self.save_names['model_set']), 'r') as f:
@@ -348,11 +349,16 @@ class FolderManager:
             model_set.update(new_set)
         return model_set
 
+    def load_model(self, filename, info=None):
+        pre = self.info_precess(info)
+        model_set = self.load_frame_set(filename=filename, info=info)
+        file = os.path.join(self.base, model_set['filename'])
+        model = NetGraph(model_set['model_str'])
+        model.load_state_dict(torch.load(os.path.join(file, pre + self.save_names['params']))['model'])
+        return model
+
     def load_frame(self, filename, info=None, new_set: dict = None):
-        if info is None:
-            pre = ''
-        else:
-            pre = info + '_'
+        pre = self.info_precess(info)
         file = os.path.join(self.base, filename)
         model_set = self.load_frame_set(filename=filename, info=info, new_set=new_set)
         frame = self.create_frame(model_set)
@@ -362,6 +368,7 @@ class FolderManager:
         return frame
 
     def load_dataset(self, model_set: dict):
+        # load dataset from modelset
         train_data = self.data_library(model_set['train_data'])
         if len(train_data) == 4:
             train_x, train_y, test_x, test_y = train_data

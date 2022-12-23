@@ -249,7 +249,7 @@ class NodeModel(nn.Module):
 
 
 test_str_unet = """# UNet
-input: 3
+input: 4
 output: 3
 encoder: 32c3s1p1 * 3
 decoder: 32c3s1p1 * 3
@@ -261,7 +261,7 @@ up: 32t4s2p1
 up1: up
 up2: up
 up3: up
-center: 32c1s1p0
+center: 64c1s1p0
 input > encoder
 encoder > down1 > down2 > down3 > center
 center > up3 > up2 > up1 > decoder > output
@@ -396,7 +396,7 @@ input>encoder>core>decoder>output
 if __name__ == "__main__":
     # 32+(64c3s1p1 +relu)+ (64c1s1p0 + leakyrelu) * 3 + tanh
     # print('result', block_command('(32c3s1p1 + leakyrelu)*3', out_ch=False))
-    net = NetGraph(test_str_encoder_decoder)
+    net = NetGraph(test_str_unet)
     print('compute order:', graph_order(net.graph, 'input', 'output'))
     net.test_order()
     net.test_describe()

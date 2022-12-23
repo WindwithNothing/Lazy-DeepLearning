@@ -244,7 +244,8 @@ class Command:
                 pass
             elif len(shape) > 1 and self.input_type is None:
                 self.input_type = 'cat'
-            elif len(shape) > 1 is list and self.input_type == 'res':
+                self.input_shape = sum(shape)
+            elif len(shape) > 1 and self.input_type == 'res':
                 self.input_shape = shape[0]
             elif self.input_type is None:
                 self.input_shape = shape[0]
